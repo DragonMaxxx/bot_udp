@@ -1,6 +1,6 @@
 # UDP BOT – termometr cyfrowy (C)
 
-Prosta aplikacja konsolowa w języku C, która symuluje termometr cyfrowy i cyklicznie wysyła dane UDP do wskazanego serwera. Dodatkowo zapisuje logi w formacie tekstowym.
+Prosta aplikacja konsolowa w języku C, która symuluje termometr cyfrowy i cyklicznie wysyła dane UDP do wskazanego serwera.
 
 ## Parametry uruchomienia
 
@@ -33,6 +33,6 @@ Czas: 1716059241, Temp: 36.5°C, Zasilanie: zasilanie bateryjne, ID: 42, CRC: 12
 
 ## Testowanie
 
-- Uruchom serwer UDP do testów, np. `gcc -o udp_bot udp_bot.c'
+- Uruchom serwer UDP do testów, np. `gcc -o udp_bot udp_bot.c`
 - Otwórz logi (`tail -f log.txt`), aby podglądać wpisy
 
