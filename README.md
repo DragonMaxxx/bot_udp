@@ -6,12 +6,6 @@ Prosta aplikacja konsolowa w języku C, która symuluje termometr cyfrowy i cykl
 
 ./udp_bot <IP> <PORT> <CYKL_WYSLANIA> <CYKL_LOGOWANIA> <ŚCIEŻKA_LOGU>
 
-
-Przykład:
-
-./udp_bot 127.0.0.1 5000 3 10 ./log.txt
-
-
 ## Przesyłane dane
 
 Każdy pakiet ma postać struktury binarnej:
