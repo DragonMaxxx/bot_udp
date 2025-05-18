@@ -33,6 +33,6 @@ Czas: 1716059241, Temp: 36.5°C, Zasilanie: zasilanie bateryjne, ID: 42, CRC: 12
 
 ## Testowanie
 
-- Uruchom serwer UDP do testów, np. `nc -lu 5000`
+- Uruchom serwer UDP do testów, np. `gcc -o udp_bot udp_bot.c'
 - Otwórz logi (`tail -f log.txt`), aby podglądać wpisy
 
