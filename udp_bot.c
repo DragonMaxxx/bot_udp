@@ -5,120 +5,147 @@
 #include <time.h>
 #include <unistd.h>
 #include <arpa/inet.h>
+#include <sys/socket.h>
+#include <errno.h>
 
-// Constant
-#define POWER_NETWORK 0
-#define POWER_BATTERY 1
+typedef enum {
+    POWER_MAINS = 0,
+    POWER_BATTERY = 1
+} PowerStatus;
 
-// Packet
+const char* power_status_str(uint8_t status) {
+    return status == POWER_MAINS ? "zasilanie sieciowe" : "zasilanie bateryjne";
+}
+
+#pragma pack(push,1)
 typedef struct {
     uint32_t timestamp;
-    uint16_t temperature;      
-    uint8_t power_status;      
+    uint16_t temperature;    
+    uint8_t power_status;
     uint8_t measurement_id;
     uint8_t checksum;
 } SensorPacket;
+#pragma pack(pop)
 
-// Functions
-void print_usage(const char *progname);
-uint8_t calculate_checksum(SensorPacket *packet);
-void log_packet(const SensorPacket *packet, FILE *log_file);
-SensorPacket generate_packet(uint8_t measurement_id);
-void send_packet(int sock, struct sockaddr_in *server_addr, SensorPacket *packet);
-void parse_args(int argc, char *argv[], char **ip, int *port, int *send_interval, int *log_interval, char **log_path);
-
-
-void print_usage(const char *progname) {
-    printf("Użycie: %s <IP> <PORT> <CYKL_WYSLANIA_S> <CYKL_LOGOWANIA_S> <SCIEZKA_LOGU>\n", progname);
-}
-
-uint8_t calculate_checksum(SensorPacket *packet) {
-    uint8_t *data = (uint8_t *)packet;
+uint8_t calculate_checksum(const SensorPacket *packet) {
+    const uint8_t *bytes = (const uint8_t*)packet;
     uint8_t sum = 0;
     for (size_t i = 0; i < sizeof(SensorPacket) - 1; i++) {
-        sum += data[i];
+        sum += bytes[i];
     }
     return sum;
 }
 
-void log_packet(const SensorPacket *packet, FILE *log_file) {
-    const char *power_str = packet->power_status == POWER_NETWORK ? "zasilanie sieciowe" : "zasilanie bateryjne";
-    float temp = packet->temperature / 10.0f;
-    fprintf(log_file, "Czas: %u, Temp: %.1f°C, Zasilanie: %s, ID: %u, CRC: %u\n",
-        packet->timestamp, temp, power_str, packet->measurement_id, packet->checksum);
+uint16_t random_temperature() {
+    return (uint16_t)((rand() % (1200 - 200 + 1)) + 200);
+}
+
+uint8_t random_power_status() {
+    return (uint8_t)(rand() % 2);
+}
+
+void fill_packet(SensorPacket *packet, uint8_t measurement_id) {
+    packet->timestamp = (uint32_t)time(NULL);
+    packet->temperature = random_temperature();
+    packet->power_status = random_power_status();
+    packet->measurement_id = measurement_id;
+    packet->checksum = 0;
+    packet->checksum = calculate_checksum(packet);
+}
+
+void log_packet(FILE *log_file, const SensorPacket *packet) {
+    time_t ts = (time_t)packet->timestamp;
+    struct tm *tm_info = localtime(&ts);
+    char time_str[20];
+    strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", tm_info);
+
+    fprintf(log_file,
+        "Czas: %s, Temp: %.1f°C, Zasilanie: %s, ID: %u, CRC: %u\n",
+        time_str,
+        packet->temperature / 10.0,
+        power_status_str(packet->power_status),
+        packet->measurement_id,
+        packet->checksum);
+
     fflush(log_file);
 }
 
-SensorPacket generate_packet(uint8_t measurement_id) {
-    SensorPacket packet;
-    packet.timestamp = (uint32_t)time(NULL);
-    packet.temperature = (rand() % 1001) + 200; 
-    packet.power_status = rand() % 2; 
-    packet.measurement_id = measurement_id;
-    packet.checksum = 0;
-    packet.checksum = calculate_checksum(&packet);
-    return packet;
-}
-
-void send_packet(int sock, struct sockaddr_in *server_addr, SensorPacket *packet) {
-    sendto(sock, packet, sizeof(SensorPacket), 0,
-           (struct sockaddr *)server_addr, sizeof(*server_addr));
-}
-
-void parse_args(int argc, char *argv[], char **ip, int *port, int *send_interval, int *log_interval, char **log_path) {
-    if (argc != 6) {
-        print_usage(argv[0]);
-        exit(EXIT_FAILURE);
-    }
-    *ip = argv[1];
-    *port = atoi(argv[2]);
-    *send_interval = atoi(argv[3]);
-    *log_interval = atoi(argv[4]);
-    *log_path = argv[5];
-}
-
 int main(int argc, char *argv[]) {
-    char *ip, *log_path;
-    int port, send_interval, log_interval;
+    if (argc != 6) {
+        fprintf(stderr, "Użycie: %s <IP> <PORT> <CYKL_WYSLANIA> <CYKL_LOGOWANIA> <ŚCIEŻKA_LOGU>\n", argv[0]);
+        return 1;
+    }
 
-    parse_args(argc, argv, &ip, &port, &send_interval, &log_interval, &log_path);
+    const char *ip = argv[1];
+    int port = atoi(argv[2]);
+    int send_cycle = atoi(argv[3]);
+    int log_cycle = atoi(argv[4]);
+    const char *log_path = argv[5];
+
+    if (port <= 0 || port > 65535 || send_cycle <= 0 || log_cycle <= 0) {
+        fprintf(stderr, "Niepoprawne parametry.\n");
+        return 1;
+    }
 
     FILE *log_file = fopen(log_path, "a");
     if (!log_file) {
         perror("Nie można otworzyć pliku logu");
-        return EXIT_FAILURE;
+        return 1;
     }
+
+    int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sockfd < 0) {
+        perror("Błąd tworzenia socketu");
+        fclose(log_file);
+        return 1;
+    }
+
+    struct sockaddr_in servaddr = {0};
+    servaddr.sin_family = AF_INET;
+    servaddr.sin_port = htons(port);
+
+    if (inet_pton(AF_INET, ip, &servaddr.sin_addr) <= 0) {
+        fprintf(stderr, "Niepoprawny adres IP\n");
+        fclose(log_file);
+        close(sockfd);
+        return 1;
+    }
+
+    SensorPacket packet = {0};
+    uint8_t measurement_id = 1;
+
+    time_t last_send = 0;
+    time_t last_log = 0;
 
     srand(time(NULL));
 
-    int sock = socket(AF_INET, SOCK_DGRAM, 0);
-    if (sock < 0) {
-        perror("Błąd tworzenia gniazda");
-        return EXIT_FAILURE;
-    }
-
-    struct sockaddr_in server_addr = {0};
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_port = htons(port);
-    inet_pton(AF_INET, ip, &server_addr.sin_addr);
-
-    uint8_t measurement_id = 1;
-    time_t last_log = 0;
-
     while (1) {
-        SensorPacket packet = generate_packet(measurement_id++);
-        send_packet(sock, &server_addr, &packet);
-
         time_t now = time(NULL);
-        if (now - last_log >= log_interval) {
-            log_packet(&packet, log_file);
+
+        if (now - last_send >= send_cycle) {
+            fill_packet(&packet, measurement_id);
+
+            ssize_t sent = sendto(sockfd, &packet, sizeof(packet), 0,
+                                  (struct sockaddr*)&servaddr, sizeof(servaddr));
+            if (sent != sizeof(packet)) {
+                fprintf(stderr, "Błąd wysyłania pakietu: %s\n", strerror(errno));
+            }
+
+            measurement_id++;
+            if (measurement_id == 0) measurement_id = 1; 
+
+            last_send = now;
+        }
+
+        if (now - last_log >= log_cycle) {
+            log_packet(log_file, &packet);
             last_log = now;
         }
 
-        sleep(send_interval);
+        usleep(100 * 1000); 
     }
 
     fclose(log_file);
-    close(sock);
+    close(sockfd);
     return 0;
 }
