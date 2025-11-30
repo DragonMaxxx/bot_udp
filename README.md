@@ -1,4 +1,4 @@
-v# UDP BOT – termometr cyfrowy (C)
+# UDP BOT – termometr cyfrowy (C)
 
 Prosta aplikacja konsolowa w języku C, która symuluje termometr cyfrowy i cyklicznie wysyła dane UDP do wskazanego serwera.
 
